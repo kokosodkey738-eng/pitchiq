@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PitchIQ – ترتيب الدوريات وصفحات الفرق</title>
+<meta name="description" content="ترتيب الدوريات الأوروبية الكبرى وصفحة لكل فريق: النتائج الأخيرة والمباريات القادمة.">
+<style>
+:root{--bg:#0b0e14;--card:#151a23;--line:#232b3a;--txt:#e8edf5;--mut:#8b96a8;--acc:#00ff87}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,"Segoe UI",Tahoma,sans-serif}
+header{padding:16px;border-bottom:1px solid var(--line)}
+header h1{margin:0 0 10px;font-size:20px}
+header h1 span{color:var(--acc)}
+#nav{display:flex;gap:8px;flex-wrap:wrap}
+#nav button{background:var(--card);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+#nav button.on{border-color:var(--acc);color:var(--acc)}
+main{max-width:900px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:8px 6px;text-align:center;border-bottom:1px solid var(--line);white-space:nowrap}
+td.t,th.t{text-align:start}
+tr.row:hover{background:#1b2230;cursor:pointer}
+img.l{width:20px;height:20px;vertical-align:middle;margin-inline-end:8px}
+.mut{color:var(--mut)}
+.pill{display:inline-block;min-width:24px;padding:2px 6px;border-radius:6px;font-size:12px;margin:0 2px;text-align:center}
+.W{background:#0f5132}.D{background:#4a4a4a}.L{background:#842029}
+.m{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+a.back{color:var(--acc);cursor:pointer}
+footer{text-align:center;color:var(--mut);font-size:12px;padding:20px}
+</style>
+</head>
+<body>
+<header><h1>PITCH<span>IQ</span></h1><div id="nav"></div></header>
+<main id="app"></main>
+<footer>البيانات من ESPN · للمعلومات فقط وليست نصيحة مراهنة</footer>
+<script>
+const LEAGUES=[["eng.1","الدوري الإنجليزي"],["esp.1","الدوري الإسباني"],["ita.1","الدوري الإيطالي"],["ger.1","الدوري الألماني"],["uefa.champions","دوري الأبطال"]];
+const API="https://site.api.espn.com/apis";
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num=v=>{const n=parseFloat(v);return Number.isFinite(n)?n:0};
+const ymd=d=>d.toISOString().slice(0,10).replace(/-/g,"");
+const fmt=d=>new Date(d).toLocaleDateString("ar-EG",{day:"numeric",month:"short"});
+const err=e=>{$("#app").innerHTML=`<p class="mut">تعذّر تحميل البيانات (${esc(e.message)}). حدّث الصفحة وجرّب تاني.</p>`};
+async function get(url){const r=await fetch(url);if(!r.ok)throw new Error(r.status);return r.json()}
+
+async function standings(league){
+  const d=await get(`${API}/v2/sports/soccer/${league}/standings`);
+  const blocks=d.children&&d.children.length?d.children:[d];
+  return blocks.map(b=>({name:b.name||"",rows:((b.standings&&b.standings.entries)||[]).map(e=>{
+    const s={};for(const x of e.stats||[])s[x.name]=x.value;
+    const t=e.team||{};
+    return{id:String(t.id),name:t.displayName||t.name,logo:t.logos&&t.logos[0]&&t.logos[0].href,
+      rank:num(s.rank),p:num(s.gamesPlayed),w:num(s.wins),d:num(s.ties),l:num(s.losses),
+      gf:num(s.pointsFor),ga:num(s.pointsAgainst),gd:num(s.pointDifferential),pts:num(s.points)};
+  }).sort((a,b)=>(a.rank||99)-(b.rank||99))}));
+}
+
+async function fixtures(league){
+  const from=new Date(Date.now()-35*864e5),to=new Date(Date.now()+21*864e5);
+  const d=await get(`${API}/site/v2/sports/soccer/${league}/scoreboard?dates=${ymd(from)}-${ymd(to)}&limit=400`);
+  return (d.events||[]).map(e=>{
+    const c=(e.competitions||[])[0]||{},cs=c.competitors||[];
+    const h=cs.find(x=>x.homeAway==="home")||cs[0]||{},a=cs.find(x=>x.homeAway==="away")||cs[1]||{};
+    const st=e.status&&e.status.type&&e.status.type.state;
+    const team=x=>({id:String(x.team&&x.team.id),name:x.team&&x.team.displayName,score:st==="pre"?null:x.score});
+    return{date:e.date,state:st,h:team(h),a:team(a)};
+  }).sort((x,y)=>x.date.localeCompare(y.date));
+}
+
+function nav(active){
+  $("#nav").innerHTML=LEAGUES.map(([id,n])=>`<button class="${id===active?"on":""}" onclick="location.hash='#/standings/${id}'">${esc(n)}</button>`).join("");
+}
+
+async function showStandings(league){
+  nav(league);$("#app").innerHTML='<p class="mut">جاري التحميل…</p>';
+  try{
+    const gs=await standings(league);
+    $("#app").innerHTML=gs.map(g=>`<div class="card">${g.name?`<h3>${esc(g.name)}</h3>`:""}<div class="wrap"><table><thead><tr><th>#</th><th class="t">الفريق</th><th>لعب</th><th>ف</th><th>ت</th><th>خ</th><th>له</th><th>عليه</th><th>فارق</th><th>نقاط</th></tr></thead><tbody>${g.rows.map(r=>`<tr class="row" onclick="location.hash='#/team/${league}/${r.id}'"><td>${r.rank}</td><td class="t">${r.logo?`<img class="l" src="${esc(r.logo)}" alt="">`:""}${esc(r.name)}</td><td>${r.p}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td><td>${r.gf}</td><td>${r.ga}</td><td>${r.gd>0?"+":""}${r.gd}</td><td><b>${r.pts}</b></td></tr>`).join("")}</tbody></table></div></div>`).join("");
+  }catch(e){err(e)}
+}
+
+async function showTeam(league,id){
+  nav(league);$("#app").innerHTML='<p class="mut">جاري التحميل…</p>';
+  try{
+    const [gs,fx]=await Promise.all([standings(league),fixtures(league)]);
+    const row=gs.flatMap(g=>g.rows).find(r=>r.id===id);
+    if(!row){$("#app").innerHTML='<p>الفريق غير موجود.</p>';return}
+    document.title=`${row.name} – PitchIQ`;
+    const mine=fx.filter(m=>m.h.id===id||m.a.id===id);
+    const done=mine.filter(m=>m.state==="post").slice(-5).reverse();
+    const next=mine.filter(m=>m.state!=="post").slice(0,5);
+    const res=m=>{const me=m.h.id===id,a=num(me?m.h.score:m.a.score),b=num(me?m.a.score:m.h.score);return a>b?"W":a<b?"L":"D"};
+    const L={W:"ف",D:"ت",L:"خ"};
+    const line=m=>`<div class="m"><span>${esc(m.h.name)}</span><b dir="ltr">${m.state==="pre"?"—":num(m.h.score)+" - "+num(m.a.score)}</b><span>${esc(m.a.name)}</span><span class="mut">${fmt(m.date)}</span></div>`;
+    $("#app").innerHTML=`<p><a class="back" onclick="location.hash='#/standings/${league}'">← العودة للترتيب</a></p>
+    <div class="card"><h2>${row.logo?`<img class="l" src="${esc(row.logo)}" alt="">`:""}${esc(row.name)}</h2>
+    <p class="mut">المركز ${row.rank} · ${row.pts} نقطة · لعب ${row.p} (ف ${row.w} · ت ${row.d} · خ ${row.l}) · له ${row.gf} · عليه ${row.ga}</p>
+    <p>آخر النتائج: ${done.length?done.map(m=>`<span class="pill ${res(m)}">${L[res(m)]}</span>`).join(""):'<span class="mut">لا توجد بيانات</span>'}</p></div>
+    <div class="card"><h3>آخر المباريات</h3>${done.length?done.map(line).join(""):'<p class="mut">لا توجد مباريات حديثة.</p>'}</div>
+    <div class="card"><h3>المباريات القادمة</h3>${next.length?next.map(line).join(""):'<p class="mut">لا توجد مباريات قادمة في الأسابيع القادمة.</p>'}</div>`;
+  }catch(e){err(e)}
+}
+
+function route(){
+  const p=location.hash.replace(/^#\//,"").split("/");
+  if(p[0]==="team"&&p[1]&&p[2])showTeam(p[1],p[2]);
+  else showStandings(p[0]==="standings"&&LEAGUES.some(l=>l[0]===p[1])?p[1]:"eng.1");
+}
+addEventListener("hashchange",route);route();
+</script>
+</body>
+</html>
