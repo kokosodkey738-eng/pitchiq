@@ -26,7 +26,10 @@ img.l{width:20px;height:20px;vertical-align:middle;margin-inline-end:8px}
 .mut{color:var(--mut)}
 .pill{display:inline-block;min-width:24px;padding:2px 6px;border-radius:6px;font-size:12px;margin:0 2px;text-align:center}
 .W{background:#0f5132}.D{background:#4a4a4a}.L{background:#842029}
-.m{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.m{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.m .n{flex:1}
+.m .d{white-space:nowrap;font-size:12px}
+.m b{min-width:18px;text-align:center}
 a.back{color:var(--acc);cursor:pointer}
 footer{text-align:center;color:var(--mut);font-size:12px;padding:20px}
 </style>
@@ -41,7 +44,6 @@ const API="https://site.api.espn.com/apis";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num=v=>{const n=parseFloat(v);return Number.isFinite(n)?n:0};
-const ymd=d=>d.toISOString().slice(0,10).replace(/-/g,"");
 const fmt=d=>new Date(d).toLocaleDateString("ar-EG",{day:"numeric",month:"short"});
 const err=e=>{$("#app").innerHTML=`<p class="mut">تعذّر تحميل البيانات (${esc(e.message)}). حدّث الصفحة وجرّب تاني.</p>`};
 async function get(url){
@@ -65,15 +67,20 @@ async function standings(league){
 // score may be a string ("2") or an object ({displayValue:"2"}) depending on the endpoint
 const sc=x=>{const s=x&&x.score;return s&&typeof s==="object"?(s.displayValue??s.value):s};
 
+// past results come from the schedule; upcoming ones need ?fixture=true
 async function fixtures(league,teamId){
-  const from=new Date(Date.now()-35*864e5),to=new Date(Date.now()+21*864e5);
-  let d;
-  try{
-    d=await get(`${API}/site/v2/sports/soccer/${league}/scoreboard?dates=${ymd(from)}-${ymd(to)}`);
-  }catch(e){
-    d=await get(`${API}/site/v2/sports/soccer/${league}/teams/${teamId}/schedule`);
+  const base=`${API}/site/v2/sports/soccer/${league}/teams/${teamId}/schedule`;
+  const rs=await Promise.allSettled([get(base),get(base+"?fixture=true")]);
+  if(rs.every(r=>r.status==="rejected"))throw rs[0].reason;
+  const seen=new Set(),evs=[];
+  for(const r of rs){
+    if(r.status!=="fulfilled")continue;
+    for(const e of r.value.events||[]){
+      if(seen.has(e.id))continue;
+      seen.add(e.id);evs.push(e);
+    }
   }
-  return (d.events||[]).map(e=>{
+  return evs.map(e=>{
     const c=(e.competitions||[])[0]||{},cs=c.competitors||[];
     const h=cs.find(x=>x.homeAway==="home")||cs[0]||{},a=cs.find(x=>x.homeAway==="away")||cs[1]||{};
     const st=(e.status&&e.status.type&&e.status.type.state)||(c.status&&c.status.type&&c.status.type.state);
@@ -106,7 +113,10 @@ async function showTeam(league,id){
     const next=mine.filter(m=>m.state!=="post").slice(0,5);
     const res=m=>{const me=m.h.id===id,a=num(me?m.h.score:m.a.score),b=num(me?m.a.score:m.h.score);return a>b?"W":a<b?"L":"D"};
     const L={W:"ف",D:"ت",L:"خ"};
-    const line=m=>`<div class="m"><span>${esc(m.h.name)}</span><b dir="ltr">${m.state==="pre"?"—":num(m.h.score)+" - "+num(m.a.score)}</b><span>${esc(m.a.name)}</span><span class="mut">${fmt(m.date)}</span></div>`;
+    // DOM order = home name, home score, away score, away name (RTL: home on the right)
+    const line=m=>m.state==="pre"
+      ?`<div class="m"><span class="n">${esc(m.h.name)}</span><span class="mut">ضد</span><span class="n">${esc(m.a.name)}</span><span class="d mut">${fmt(m.date)}</span></div>`
+      :`<div class="m"><span class="n">${esc(m.h.name)}</span><b>${num(m.h.score)}</b><span class="mut">-</span><b>${num(m.a.score)}</b><span class="n">${esc(m.a.name)}</span><span class="d mut">${fmt(m.date)}</span></div>`;
     $("#app").innerHTML=`<p><a class="back" onclick="location.hash='#/standings/${league}'">← العودة للترتيب</a></p>
     <div class="card"><h2>${row.logo?`<img class="l" src="${esc(row.logo)}" alt="">`:""}${esc(row.name)}</h2>
     <p class="mut">المركز ${row.rank} · ${row.pts} نقطة · لعب ${row.p} (ف ${row.w} · ت ${row.d} · خ ${row.l}) · له ${row.gf} · عليه ${row.ga}</p>
